@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEDERCINHO SOCCER - GBA EDITION</title>
+    <style>
+        body {
+            background-color: #202020;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            height: 100vh;
+            margin: 0;
+        }
+        #gameContainer {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            border: 10px solid #333;
+            border-radius: 5px;
+            /* Forzar estética pixelada */
+            image-rendering: pixelated; 
+            image-rendering: crisp-edges;
+        }
+        canvas {
+            background-color: #228B22; /* Verde césped */
+            display: block;
+            /* Resolución interna baja escalada */
+            width: 640px; 
+            height: 480px;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 10px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+        }
+        .controls-info {
+            margin-top: 10px;
+            font-size: 12px;
+            text-align: center;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <div id="ui-layer">
+            <div id="scoreP1">NEDERCINHO: 0</div>
+            <div id="scoreCPU">CPU: 0</div>
+        </div>
+        <canvas id="gameCanvas" width="320" height="240"></canvas>
+    </div>
+
+    <div class="controls-info">
+        <p>--- CONTROLES GBA ---</p>
+        <p>Mover: FLECHAS | Disparo (A): Z | Pase (B): X | Sprint (L/R): A o S</p>
+    </div>
+
+<script>
+    // --- CONFIGURACIÓN INICIAL ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const WIDTH = canvas.width;
+    const HEIGHT = canvas.height;
+
+    // Colores
+    const C_GRASS = "#228B22";
+    const C_LINES = "#FFFFFF";
+    const C_PLAYER = "#0000FF"; // Azul
+    const C_CPU = "#DC143C";    // Rojo
+    const C_BALL = "#FFFFFF";
+
+    // Estado del juego
+    let scoreP1 = 0;
+    let scoreCPU = 0;
+    const GOAL_LINE_X = 20;
+
+    // Teclas presionadas
+    const keys = {
+        ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+        z: false, x: false, a: false, s: false
+    };
+
+    // --- OBJETOS DEL JUEGO ---
+
+    const player = {
+        x: WIDTH / 4,
+        y: HEIGHT / 2,
+        radius: 8,
+        baseSpeed: 2,
+        name: "NEDERCINHO",
+        color: C_PLAYER,
+        dx: 0, dy: 0
+    };
+
+    const cpu = {
+        x: WIDTH * 3 / 4,
+        y: HEIGHT / 2,
+        radius: 8,
+        speed: 1.8, // Un poco más lento que el sprint del jugador
+        color: C_CPU,
+        dx: 0, dy: 0
+    };
+
+    const ball = {
+        x: WIDTH / 2,
+        y: HEIGHT / 2,
+        radius: 4,
+        vx: 0,
+        vy: 0,
+        friction: 0.96 // Fricción para que ruede y pare
+    };
+
+
+    // --- LISTENERS DE CONTROL ---
+    document.addEventListener('keydown', (e) => {
+        if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+    });
+    document.addEventListener('keyup', (e) => {
+        if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+    });
+
+
+    // --- LÓGICA CENTRAL ---
+
+    function update() {
+        // 1. Movimiento del Jugador (Nedercinho)
+        player.dx = 0;
+        player.dy = 0;
+        // Sprint si se presiona A o S (L/R en GBA)
+        let currentSpeed = (keys.a || keys.s) ? player.baseSpeed * 1.6 : player.baseSpeed;
+
+        if (keys.ArrowUp) player.dy = -currentSpeed;
+        if (keys.ArrowDown) player.dy = currentSpeed;
+        if (keys.ArrowLeft) player.dx = -currentSpeed;
+        if (keys.ArrowRight) player.dx = currentSpeed;
+
+        player.x += player.dx;
+        player.y += player.dy;
+        keepInsideBounds(player);
+
+        // 2. Movimiento de la IA (CPU)
+        // Lógica simple: perseguir la pelota
+        let distToBallX = ball.x - cpu.x;
+        let distToBallY = ball.y - cpu.y;
+        let distToBall = Math.sqrt(distToBallX*distToBallX + distToBallY*distToBallY);
+
+        if (distToBall > ball.radius + cpu.radius) {
+            // Normalizar vector y mover
+            cpu.dx = (distToBallX / distToBall) * cpu.speed;
+            cpu.dy = (distToBallY / distToBall) * cpu.speed;
+        } else {
+            // IA tiene la pelota, intenta avanzar a la portería
+            cpu.dx = cpu.speed * 0.5; // Se mueve más lento con balón
+            // Pequeña IA para intentar centrarse hacia la portería
+            if (cpu.y < HEIGHT/2 - 20) cpu.dy = cpu.speed * 0.5;
+            else if (cpu.y > HEIGHT/2 + 20) cpu.dy = -cpu.speed * 0.5;
+            else cpu.dy = 0;
+        }
+
+        cpu.x += cpu.dx;
+        cpu.y += cpu.dy;
+        keepInsideBounds(cpu);
+
+        // 3. Física de la Pelota
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+        ball.vx *= ball.friction;
+        ball.vy *= ball.friction;
+
+        // Rebote en paredes superior/inferior
+        if (ball.y - ball.radius < 0 || ball.y + ball.radius > HEIGHT) {
+            ball.vy = -ball.vy;
+            ball.y = (ball.y < HEIGHT/2) ? ball.radius : HEIGHT - ball.radius;
+        }
+
+        // 4. Interacción Jugador-Pelota (Chutar/Conducir)
+        checkInteraction(player, keys.z, keys.x, 1); // Dirección 1 = Hacia derecha
+        checkInteraction(cpu, false, false, -1); // IA simple, dirección -1 = Hacia izquierda
+
+        // 5. Detección de Goles
+        if (ball.x < GOAL_LINE_X) {
+            scoreCPU++;
+            updateScoreUI();
+            resetPositions();
+        } else if (ball.x > WIDTH - GOAL_LINE_X) {
+            scoreP1++;
+            updateScoreUI();
+            resetPositions();
+        }
+    }
+
+    // Función auxiliar para mantener jugadores en el campo
+    function keepInsideBounds(p) {
+        if (p.x < p.radius) p.x = p.radius;
+        if (p.x > WIDTH - p.radius) p.x = WIDTH - p.radius;
+        if (p.y < p.radius) p.y = p.radius;
+        if (p.y > HEIGHT - p.radius) p.y = HEIGHT - p.radius;
+    }
+
+    // Función auxiliar de interacción con el balón
+    function checkInteraction(p, shootKey, passKey, goalDirection) {
+        let dist = Math.hypot(p.x - ball.x, p.y - ball.y);
+        let collisionDist = p.radius + ball.radius + 2; // +2 pixel de margen
+
+        if (dist < collisionDist) {
+            // Tiene el balón
+            if (shootKey) {
+                // Disparo fuerte (Botón A/Z)
+                ball.vx = 8 * goalDirection;
+                // Añadir un poco de ángulo basado en el movimiento del jugador
+                ball.vy = p.dy * 0.5; 
+            } else if (passKey) {
+                // Pase corto (Botón B/X)
+                ball.vx = 4 * goalDirection;
+                ball.vy = p.dy * 0.5;
+            } else {
+                // Conducción (Dribbling)
+                // El balón se pega al pie del jugador
+                ball.vx = p.dx * 1.2; 
+                ball.vy = p.dy * 1.2;
+                // Si la CPU lo toca, lo patea automáticamente hacia adelante suave
+                if(p === cpu && Math.abs(ball.vx) < 1 && Math.abs(ball.vy) < 1) {
+                     ball.vx = -3;
+                }
+            }
+        }
+    }
+
+    function resetPositions() {
+        ball.x = WIDTH / 2;
+        ball.y = HEIGHT / 2;
+        ball.vx = 0; ball.vy = 0;
+        player.x = WIDTH / 4; player.y = HEIGHT / 2;
+        cpu.x = WIDTH * 3 / 4; cpu.y = HEIGHT / 2;
+        // Pequeña pausa antes de reanudar (opcional, no implementada para fluidez arcade)
+    }
+
+    function updateScoreUI() {
+        document.getElementById('scoreP1').innerText = `NEDERCINHO: ${scoreP1}`;
+        document.getElementById('scoreCPU').innerText = `CPU: ${scoreCPU}`;
+    }
+
+    // --- DIBUJADO ---
+
+    function draw() {
+        // Limpiar y dibujar césped
+        ctx.fillStyle = C_GRASS;
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+        // Líneas del campo
+        ctx.strokeStyle = C_LINES;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        // Borde exterior y línea central
+        ctx.rect(GOAL_LINE_X, 10, WIDTH - GOAL_LINE_X*2, HEIGHT - 20);
+        ctx.moveTo(WIDTH / 2, 10);
+        ctx.lineTo(WIDTH / 2, HEIGHT - 10);
+        ctx.stroke();
+        
+        // Círculo central
+        ctx.beginPath();
+        ctx.arc(WIDTH / 2, HEIGHT / 2, 30, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Dibujar Jugadores y Balón
+        drawCircle(cpu.x, cpu.y, cpu.radius, cpu.color);
+        drawPlayer(player);
+        drawCircle(ball.x, ball.y, ball.radius, C_BALL, true);
+    }
+
+    function drawCircle(x, y, r, color, hasBorder=false) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        if(hasBorder) {
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+    }
+
+    function drawPlayer(p) {
+        // Dibujar el cuerpo
+        drawCircle(p.x, p.y, p.radius, p.color);
+        
+        // Dibujar el nombre "NEDERCINHO" encima
+        ctx.fillStyle = C_LINES;
+        ctx.font = "bold 8px 'Courier New'";
+        ctx.textAlign = "center";
+        ctx.fillText(p.name, p.x, p.y - 12);
+    }
+
+    // --- BUCLE PRINCIPAL ---
+    function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // Iniciar juego
+    gameLoop();
+
+</script>
+</body>
+  </html>
