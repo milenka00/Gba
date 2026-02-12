@@ -3,64 +3,49 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Brilloteo Mobile</title>
+<title>Croco Adventure</title>
 
 <style>
 body{
     margin:0;
     overflow:hidden;
-    background:black;
-    font-family:Courier New, monospace;
-    text-align:center;
+    background:#000;
+    font-family:monospace;
 }
 
 canvas{
-    background:linear-gradient(#ff9a9e,#fad0c4);
     display:block;
-    margin:auto;
-    image-rendering:pixelated;
-}
-
-#title{
-    color:yellow;
-    font-size:28px;
-    text-shadow:2px 2px red;
-    margin-top:10px;
+    background:linear-gradient(#87CEEB,#d0f4ff);
 }
 
 .controls{
     position:fixed;
-    bottom:20px;
+    bottom:15px;
     width:100%;
     display:flex;
-    justify-content:space-between;
-    padding:0 40px;
+    justify-content:space-around;
 }
 
 .btn{
-    width:80px;
-    height:80px;
+    width:65px;
+    height:65px;
     border-radius:50%;
     border:none;
-    font-size:30px;
+    font-size:20px;
     background:#ff0077;
     color:white;
-    box-shadow:0 0 20px #ff00aa;
-}
-
-.btn:active{
-    transform:scale(0.9);
 }
 </style>
 </head>
 
 <body>
 
-<div id="title">🏍 BRILLOTEO 🏁</div>
-<canvas id="game" width="350" height="600"></canvas>
+<canvas id="game"></canvas>
 
 <div class="controls">
     <button class="btn" id="left">⬅</button>
+    <button class="btn" id="jump">⬆</button>
+    <button class="btn" id="attack">💥</button>
     <button class="btn" id="right">➡</button>
 </div>
 
@@ -68,94 +53,165 @@ canvas{
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let gravity = 0.6;
+let cameraX = 0;
+let keys = {};
+
+let crocoImg = new Image();
+crocoImg.src = "croco.png";
+
 let player = {
-    x: 150,
-    y: 500,
-    width: 50,
-    height: 60,
-    speed: 6
+    x:100,
+    y:200,
+    width:80,
+    height:80,
+    vx:0,
+    vy:0,
+    speed:4,
+    jumpPower:-12,
+    jumps:0,
+    maxJumps:2,
+    lives:3,
+    health:100,
+    attacking:false
 };
 
-let obstacles = [];
-let score = 0;
-let gameOver = false;
+let platforms = [
+    {x:0,y:canvas.height-60,width:3000,height:60},
+    {x:400,y:canvas.height-200,width:200,height:20},
+    {x:800,y:canvas.height-280,width:200,height:20}
+];
+
+let enemies = [
+    {x:700,y:canvas.height-100,width:60,height:60,dir:1,alive:true}
+];
 
 function drawPlayer(){
-    ctx.fillStyle="green";
-    ctx.fillRect(player.x, player.y, player.width, player.height);
+    ctx.drawImage(crocoImg, player.x-cameraX, player.y, player.width, player.height);
 }
 
-function drawObstacles(){
+function drawPlatforms(){
+    ctx.fillStyle="#2ecc71";
+    platforms.forEach(p=>{
+        ctx.fillRect(p.x-cameraX,p.y,p.width,p.height);
+    });
+}
+
+function drawEnemies(){
     ctx.fillStyle="red";
-    obstacles.forEach(ob=>{
-        ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
+    enemies.forEach(e=>{
+        if(e.alive)
+        ctx.fillRect(e.x-cameraX,e.y,e.width,e.height);
     });
 }
 
-function moveObstacles(){
-    obstacles.forEach(ob=>{
-        ob.y += 5;
-    });
-    obstacles = obstacles.filter(ob=>ob.y < canvas.height);
-}
+function updatePlayer(){
+    player.vy += gravity;
+    player.y += player.vy;
+    player.x += player.vx;
 
-function createObstacle(){
-    let x = Math.random() * (canvas.width - 50);
-    obstacles.push({x:x, y:-60, width:50, height:60});
-}
-
-function detectCollision(){
-    obstacles.forEach(ob=>{
+    platforms.forEach(p=>{
         if(
-            player.x < ob.x + ob.width &&
-            player.x + player.width > ob.x &&
-            player.y < ob.y + ob.height &&
-            player.y + player.height > ob.y
+            player.x < p.x+p.width &&
+            player.x+player.width > p.x &&
+            player.y < p.y+p.height &&
+            player.y+player.height > p.y
         ){
-            gameOver = true;
+            if(player.vy>0){
+                player.y = p.y-player.height;
+                player.vy=0;
+                player.jumps=0;
+            }
+        }
+    });
+
+    if(keys["left"]) player.vx=-player.speed;
+    else if(keys["right"]) player.vx=player.speed;
+    else player.vx=0;
+
+    cameraX = player.x - canvas.width/2;
+}
+
+function updateEnemies(){
+    enemies.forEach(e=>{
+        if(!e.alive) return;
+
+        e.x += 2*e.dir;
+        if(e.x < 600 || e.x > 900) e.dir*=-1;
+
+        if(
+            player.x < e.x+e.width &&
+            player.x+player.width > e.x &&
+            player.y < e.y+e.height &&
+            player.y+player.height > e.y
+        ){
+            if(player.attacking){
+                e.alive=false;
+            } else {
+                player.health-=10;
+                player.x=100;
+                player.y=200;
+            }
         }
     });
 }
 
-function drawScore(){
+function drawUI(){
     ctx.fillStyle="white";
-    ctx.font="20px Courier New";
-    ctx.fillText("Puntos: "+score,10,30);
+    ctx.fillText("Vidas: "+player.lives,20,30);
+
+    ctx.fillStyle="red";
+    ctx.fillRect(20,50,200,20);
+    ctx.fillStyle="lime";
+    ctx.fillRect(20,50,player.health*2,20);
 }
 
 function gameLoop(){
-    if(gameOver){
-        ctx.fillStyle="white";
-        ctx.font="30px Courier New";
-        ctx.fillText("GAME OVER",70,300);
-        return;
-    }
-
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    drawPlayer();
-    drawObstacles();
-    moveObstacles();
-    detectCollision();
-    drawScore();
+    updatePlayer();
+    updateEnemies();
 
-    score++;
-    requestAnimationFrame(gameLoop);
+    drawPlatforms();
+    drawEnemies();
+    drawPlayer();
+    drawUI();
+
+    if(player.health<=0){
+        player.lives--;
+        player.health=100;
+    }
+
+    if(player.lives>0){
+        requestAnimationFrame(gameLoop);
+    } else {
+        ctx.fillStyle="white";
+        ctx.font="40px monospace";
+        ctx.fillText("GAME OVER",canvas.width/2-120,canvas.height/2);
+    }
 }
 
-document.getElementById("left").addEventListener("touchstart",()=>{
-    if(player.x>0){
-        player.x -= player.speed*3;
+document.getElementById("left").addEventListener("touchstart",()=>keys["left"]=true);
+document.getElementById("left").addEventListener("touchend",()=>keys["left"]=false);
+
+document.getElementById("right").addEventListener("touchstart",()=>keys["right"]=true);
+document.getElementById("right").addEventListener("touchend",()=>keys["right"]=false);
+
+document.getElementById("jump").addEventListener("touchstart",()=>{
+    if(player.jumps < player.maxJumps){
+        player.vy = player.jumpPower;
+        player.jumps++;
     }
 });
 
-document.getElementById("right").addEventListener("touchstart",()=>{
-    if(player.x < canvas.width-player.width){
-        player.x += player.speed*3;
-    }
+document.getElementById("attack").addEventListener("touchstart",()=>{
+    player.attacking=true;
+    setTimeout(()=>player.attacking=false,300);
 });
 
-setInterval(createObstacle,1200);
 gameLoop();
 </script>
 
